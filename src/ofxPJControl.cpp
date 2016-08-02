@@ -21,12 +21,32 @@ ofxPJControl::~ofxPJControl() {
 
 }
 
-bool ofxPJControl::getProjectorStatus() {
-	return projStatus;
+bool ofxPJControl::getProjectorPowerStatus() {
+	return projStatus; //ideally returns if projector is turned on or not, but not foolproof yet
+}
+
+bool ofxPJControl::getIsTCPClientConnected(){
+    return pjClient.isConnected();
 }
 
 void ofxPJControl::setProjectorType(int protocol) { //NEC_MODE or PJLINK_MODE
 		commMode = protocol;
+    
+    string projType = "";
+    
+    if(protocol ==0){
+        projType = "PJLINK";
+    }else if(protocol==1){
+        projType=="NEC";
+    }else if(protocol==2){
+        projType=="CHRISTIE";
+    }else if(protocol==3){
+        projType=="SANYO";
+    }else if(protocol==4){
+        projType=="ProjectionDesign";
+    }
+    
+    ofLogNotice()<<"-----Projector Type set to: " + projType <<endl;
 }
 
 void ofxPJControl::setup(string IP_add, int port, int protocol, string password) {
@@ -34,6 +54,7 @@ void ofxPJControl::setup(string IP_add, int port, int protocol, string password)
 	setProjectorType(protocol);
 	setProjectorPort(port);
     setProjectorPassword(password);
+    projStatus = false;
 }
 
 void ofxPJControl::setProjectorIP(string IP_add) {
@@ -85,23 +106,65 @@ void ofxPJControl::Off(){
     }
 }
 
-void ofxPJControl::sendPJLinkCommand(string command) {
-		string msgRx="";
+bool ofxPJControl::pingIPAddress(string _IP){
+    string pingStr = (string)"ping -c 1 -t 1 " + IPAddress ;
+    
+    bool pingSuccess = false;
+    int flag = system( pingStr.c_str());
+    //cout<< "______________PING FLAG: " << flag <<endl;
+    
+    if(flag == 0){
+        cout<<"Successfully Pinged: " + IPAddress <<endl;
+        pingSuccess = true;
+    }else{
+        cout<<ofGetTimestampString() + " Unable to Ping:  "<<IPAddress<<endl;
+        pingSuccess = false;
+    }
+    return pingSuccess;
+}
 
-        if(!pjClient.isConnected()) {
-            pjClient.setVerbose(true);
+string ofxPJControl::attemptConnection(){
+    string msgRx="";
+    
+    if(!pjClient.isConnected()) {
+        
+        
+        if(pingIPAddress(IPAddress)){
+            //only try to establish tcp connection if ping is successful - otherwise, skip it because threading will lock up the app while waiting on a connection
             connected = pjClient.setup(IPAddress, pjPort,true);
-            if(connected){
-                ofLogNotice() << "connection established: " << IPAddress << ":" << pjPort << endl;
-                string response = "";
-                while (msgRx.length() < 8) {
-                    msgRx = pjClient.receiveRaw();
-                }
-                ofLogNotice() << "received response: " << msgRx << endl;
-            } else {
-                ofLogError() << "faled to connect."<<endl;
+        }else{
+            cout<<"Ping Unsuccessful - TCP Connection not attempted"<<endl;
+        }
+        
+        if(connected){
+            ofLogNotice() << "Connection Established: " << IPAddress << ":" << pjPort << endl;
+            string response = "";
+            while (msgRx.length() < 8) {
+                msgRx = pjClient.receiveRaw();
             }
-		}
+            ofLogNotice() << "Received Response: " << msgRx << endl;
+        } else {
+            ofLogError() << "-------Failed to connect."<<endl;
+            //we should try to reconnect in this case...or send a message of current status
+        }
+    }
+    
+    return msgRx;
+}
+
+void ofxPJControl::closeConnection(){
+    ofLogNotice("closeConnection")<<"____Closing TCP Connection____"<<endl;
+    pjClient.close();
+    connected = false;
+    
+}
+
+
+
+void ofxPJControl::sendPJLinkCommand(string command, bool sendOn) {
+    string msgRx="";
+
+    msgRx = attemptConnection();
     
     if(connected){
         string authToken = "";
@@ -116,159 +179,212 @@ void ofxPJControl::sendPJLinkCommand(string command) {
             md5.update(hash + password);
             authToken = DigestEngine::digestToHex(md5.digest());
         }
-		ofLogNotice() << "sending command: " << authToken+command << endl;
+		ofLogNotice() << "Attempting to send command with auth: " << authToken+command << endl;
 		pjClient.sendRaw(authToken+command);
 		msgRx = "";
 		while (msgRx.length() < 8) {
 			msgRx = pjClient.receiveRaw();
 		}
-        ofLogNotice() << "received response: " << msgRx << endl;
-
-        pjClient.close();
+        ofLogNotice() << "Received response: " << msgRx << endl;
+        //Really we should check if we get a valid response here...
+        if(sendOn){
+            projStatus = true;
+        }else{
+            projStatus = false;
+        }
+        closeConnection();
 		//connected = false;
     } else {
-        ofLogError()<< "still not connected."<<endl;
-        pjClient.close();
+        ofLogError()<< "Wasn't connected - closing connection. Still not connected."<<endl;
+        closeConnection();
 
     }
 }
 
-void ofxPJControl::sendCommand(string command){
-        if(!pjClient.isConnected()) {
-			pjClient.setVerbose(true);
-			ofLogNotice() << "connecting to : " << IPAddress << ":" << pjPort << endl;
-			connected = pjClient.setup(IPAddress, pjPort, true);
-			ofLogNotice() << "connection state : " << connected;
-		}
-        ofLogNotice() << "sending command : " << command << endl;
+void ofxPJControl::sendCommand(string command,bool sendOn){
+//        if(!pjClient.isConnected()) {
+//			pjClient.setVerbose(true);
+//			ofLogNotice() << "Connecting to : " << IPAddress << ":" << pjPort << endl;
+//			connected = pjClient.setup(IPAddress, pjPort, true);
+//			ofLogNotice() << "Connection state : " << connected;
+//		}
+    
+    attemptConnection();
+    
+    if(connected){
+        ofLogNotice() << "Attempting to Send Command : " << command << endl;
         pjClient.sendRaw(command);
         ofLogNotice() << "Response length (Bytes) : " << pjClient.getNumReceivedBytes() << endl;
         msgRx = "";
         msgRx = pjClient.receiveRaw();
-        ofLogNotice() << "received response : " << msgRx << endl;
-
-        pjClient.close();
+        ofLogNotice() << "Received response : " << msgRx << endl;
+        //Really we should check if we get a valid response here...
+        if(sendOn){
+            projStatus = true;
+        }else{
+            projStatus = false;
+        }
+        closeConnection();
+    }
 }
 
-void ofxPJControl::nec_On(){
 
-	pjClient.close(); //close any open connections first
-	char* buffer = new char[6]; //02H 00H 00H 00H 00H 02H (the on command in hex)
-	buffer[0] = 2;
-	buffer[1] = 0;
-	buffer[2] = 0;
-	buffer[3] = 0;
-	buffer[4] = 0;
-	buffer[5] = 2;
-
-	pjClient.setVerbose(true);
-	if(!pjClient.isConnected()) {
-		connected = pjClient.setup(IPAddress, NEC_PORT);
-		ofLogNotice() << "connection established: " << IPAddress << ":" << NEC_PORT << endl;
-	}
-	ofLogNotice() << "sending command: ON" << endl;
-
-	pjClient.sendRawBytes(buffer, 6);
-
-	printf("sent: %x %x %x %x %x %x\n",buffer[0] , buffer[1] , buffer[2] , buffer[3] , buffer[4] , buffer[5] );
-
-	char* rxBuffer = new char[6];
-
-	pjClient.receiveRawBytes(rxBuffer, 6);
-
-	printf("received: %x %x %x %x %x %x\n",rxBuffer[0] , rxBuffer[1] , rxBuffer[2] , rxBuffer[3] , rxBuffer[4] , rxBuffer[5] );
-
-	projStatus = true;
-
-	delete rxBuffer;
-	delete buffer;
-}
-
-void ofxPJControl::nec_Off() {
-
-	char* buffer = new char[6]; //02H 01H 00H 00H 00H 03H (the off command in hex)
-	buffer[0] = 2;
-	buffer[1] = 1;
-	buffer[2] = 0;
-	buffer[3] = 0;
-	buffer[4] = 0;
-	buffer[5] = 3;
-
-	projStatus = true;
-
-	pjClient.setVerbose(true);
-
-	if(!pjClient.isConnected()) {
-		connected = pjClient.setup(IPAddress, NEC_PORT);
-		ofLogNotice() << "connection established: " << IPAddress << ":" << NEC_PORT << endl;
-	}
-
-	ofLogNotice() << "sending command: OFF " << endl;
-
-	pjClient.sendRawBytes(buffer, 6);
-	printf("send: %x %x %x %x %x %x\n",buffer[0] , buffer[1] , buffer[2] , buffer[3] , buffer[4] , buffer[5] );
-
-
-	char* rxBuffer = new char[6];
-
-	pjClient.receiveRawBytes(rxBuffer, 6);
-
-	printf("receive: %x %x %x %x %x %x\n",rxBuffer[0] , rxBuffer[1] , rxBuffer[2] , rxBuffer[3] , rxBuffer[4] , rxBuffer[5] );
-
-	projStatus = false;
-
-	delete rxBuffer;
-	delete buffer;
-}
 
 void ofxPJControl::pjLink_On() {
 	string command = "%1POWR 1\r";
-    sendPJLinkCommand(command);
-    projStatus = true; //projector on
+    sendPJLinkCommand(command, true);
+    ofLogNotice()<<"PJ LINK ON SENT"<<endl;
 
 }
 
 void ofxPJControl::pjLink_Off() {
 	string command = "%1POWR 0\r";
-	sendPJLinkCommand(command);
-	projStatus = false; //projector off
+	sendPJLinkCommand(command, false);
+    ofLogNotice()<<"PJ LINK OFF SENT"<<endl;
 }
 
 void ofxPJControl::sanyo_On() {
 	string command = "PWR ON\r";
-	sendCommand(command);
-	projStatus = true; //projector on
+	sendCommand(command, true);
+    ofLogNotice()<<"PJ LINK SANYO ON SENT"<<endl;
 }
 
 void ofxPJControl::sanyo_Off() {
 	string command = "PWR OFF\r";
-	sendCommand(command);
-	projStatus = false; //projector off
+	sendCommand(command, false);
+    ofLogNotice()<<"PJ LINK SANYO ON SENT"<<endl;
 }
 
 void ofxPJControl::christie_On() {
 	string command = "(PWR1)";
-	sendCommand(command);
-	projStatus = true; //projector on
+	sendCommand(command, true);
+    ofLogNotice()<<"PJ LINK CHRISTIE ON SENT"<<endl;
 }
 
 void ofxPJControl::christie_Off() {
 	string command = "(PWR0)";
-	sendCommand(command);
-	projStatus = false; //projector off
+	sendCommand(command, false);
+    ofLogNotice()<<"PJ LINK CHRISTIE OFF SENT"<<endl;
 }
 
 void ofxPJControl::pjDesign_On() {
     string command = ":POWR 1\r";
-    sendCommand(command);
-    projStatus = true; //projector on
+    sendCommand(command, true);
+    ofLogNotice()<<"PJ LINK ProjDesign ON SENT"<<endl;
 }
 
 void ofxPJControl::pjDesign_Off() {
     string command = ":POWR 0\r";
-    sendCommand(command);
-    projStatus = false; //projector off
+    sendCommand(command, false);
+    ofLogNotice()<<"PJ LINK ProjDesign OFF SENT"<<endl;
 }
 
+void ofxPJControl::nec_On(){
+    
+    closeConnection(); //close any open connections first
+    char* buffer = new char[6]; //02H 00H 00H 00H 00H 02H (the on command in hex)
+    buffer[0] = 2;
+    buffer[1] = 0;
+    buffer[2] = 0;
+    buffer[3] = 0;
+    buffer[4] = 0;
+    buffer[5] = 2;
+    
+    pjClient.setVerbose(true);
+    if(!pjClient.isConnected()) {
+        if(pingIPAddress(IPAddress)){
+            //only try to establish tcp connection if ping is successful - otherwise, skip it because threading will lock up the app while waiting on a connection
+            connected = pjClient.setup(IPAddress, NEC_PORT);
+        }else{
+            cout<<"Unable to ping! Did not attempt TCP Connection"<<endl;
+        }
+        if(connected){
+            ofLogNotice() << " NEC connection established: " << IPAddress << ":" << NEC_PORT << endl;
+        }
+    }
+    
+    if(connected){
+        ofLogNotice() << "Sending NEC Command: ON" << endl;
+        
+        pjClient.sendRawBytes(buffer, 6);
+        
+        printf("sent: %x %x %x %x %x %x\n",buffer[0] , buffer[1] , buffer[2] , buffer[3] , buffer[4] , buffer[5] );
+        
+        char* rxBuffer = new char[6];
+        
+        if(pjClient.receiveRawBytes(rxBuffer, 6)>0){ //message size should be something other than -1, otherwise, it was a failure
+            
+            printf("NEC Receive: %x %x %x %x %x %x\n",rxBuffer[0] , rxBuffer[1] , rxBuffer[2] , rxBuffer[3] , rxBuffer[4] , rxBuffer[5] );
+            
+            //Make sure we mark this ON
+            projStatus = true;
+            
+            delete[] rxBuffer;
+            delete[] buffer;
+            closeConnection();
+        }else{
+            ofLogNotice()<<"Didn't receive response from NEC for off command" <<endl;
+        }
+    }else{
+        ofLogNotice()<<"Not Connected for NEC ON Command" <<endl;
+    }
+}
+
+void ofxPJControl::nec_Off() {
+    
+    char* buffer = new char[6]; //02H 01H 00H 00H 00H 03H (the off command in hex)
+    buffer[0] = 2;
+    buffer[1] = 1;
+    buffer[2] = 0;
+    buffer[3] = 0;
+    buffer[4] = 0;
+    buffer[5] = 3;
+    
+    projStatus = true;
+    
+    pjClient.setVerbose(true);
+    
+    if(!pjClient.isConnected()) {
+        if(pingIPAddress(IPAddress)){
+            //only try to establish tcp connection if ping is successful - otherwise, skip it because threading will lock up the app while waiting on a connection
+            connected = pjClient.setup(IPAddress, NEC_PORT);
+        }else{
+            cout<<"Unable to ping! Did not attempt TCP Connection"<<endl;
+        }
+        if(connected){
+            ofLogNotice() << " NEC connection established: " << IPAddress << ":" << NEC_PORT << endl;
+        }
+    }
+    
+    if(connected){
+        ofLogNotice() << "Sending NEC Command: OFF " << endl;
+        
+        pjClient.sendRawBytes(buffer, 6);
+        printf("NEC Send: %x %x %x %x %x %x\n",buffer[0] , buffer[1] , buffer[2] , buffer[3] , buffer[4] , buffer[5] );
+        
+        
+        char* rxBuffer = new char[6];
+        
+        
+        if(pjClient.receiveRawBytes(rxBuffer, 6)>0){ //message size should be something other than -1, otherwise, it was a failure
+        
+            printf("NEC Receive: %x %x %x %x %x %x\n",rxBuffer[0] , rxBuffer[1] , rxBuffer[2] , rxBuffer[3] , rxBuffer[4] , rxBuffer[5] );
+        
+            //Make sure we mark this OFF
+            projStatus = false;
+        
+            delete[] rxBuffer;
+            delete[] buffer;
+            
+            //we'll close the connection for every
+            closeConnection();
+            
+        }else{
+            ofLogNotice()<<"Didn't receive response from NEC for off command" <<endl;
+        }
+    }else{
+        ofLogNotice()<<"Not Connected for NEC OFF Command" <<endl;
+    }
+}
 
 

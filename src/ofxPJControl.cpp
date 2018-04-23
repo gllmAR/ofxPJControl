@@ -22,6 +22,24 @@ ofxPJControl::~ofxPJControl() {
 }
 
 bool ofxPJControl::getProjectorPowerStatus() {
+    // idea to get projector status
+    if(commMode == NEC_MODE) {
+        cout<<"not implemented yet"<<endl;
+    }
+    else if (commMode == PJLINK_MODE) {
+        cout<<"not implemented yet"<<endl;
+    //   pjLink_get_power_status();
+    }
+    else if (commMode == CHRISTIE_MODE) {
+        cout<<"not implemented yet"<<endl;
+    }
+    else if (commMode == SANYO_MODE) {
+        cout<<"not implemented yet"<<endl;
+    }
+    else if (commMode == PJDESIGN_MODE) {
+        cout<<"not implemented yet"<<endl;
+    }
+    
 	return projStatus; //ideally returns if projector is turned on or not, but not foolproof yet
 }
 
@@ -106,6 +124,52 @@ void ofxPJControl::Off(){
     }
 }
 
+
+void ofxPJControl::mute_on() {
+    if(commMode == NEC_MODE) {
+        cout<<"not implemented yet"<<endl;
+        //nec_mute_on();
+    }
+    else if (commMode == PJLINK_MODE) {
+        pjLink_mute_on();
+    }
+    else if (commMode == CHRISTIE_MODE) {
+        cout<<"not implemented yet"<<endl;
+        //christie_mute_on();
+    }
+    else if (commMode == SANYO_MODE) {
+        cout<<"not implemented yet"<<endl;
+        //sanyo_mute_on();
+    }
+    else if (commMode == PJDESIGN_MODE) {
+        cout<<"not implemented yet"<<endl;
+        //pjDesign_mute_on();
+    }
+}
+
+void ofxPJControl::mute_off(){
+    if(commMode == NEC_MODE) {
+        cout<<"not implemented yet"<<endl;
+        //nec_mute_off();
+    }
+    else if (commMode == PJLINK_MODE) {
+        pjLink_mute_off();
+    }
+    else if (commMode == CHRISTIE_MODE) {
+        cout<<"not implemented yet"<<endl;
+        //christie_mute_off();
+    }
+    else if (commMode == SANYO_MODE) {
+        cout<<"not implemented yet"<<endl;
+        //sanyo_mute_off();
+    }
+    else if (commMode == PJDESIGN_MODE) {
+        cout<<"not implemented yet"<<endl;
+        //pjDesign_mute_off();
+    }
+}
+
+
 bool ofxPJControl::pingIPAddress(string _IP){
     string pingStr = (string)"ping -c 1 -t 1 " + IPAddress ;
     
@@ -185,6 +249,9 @@ void ofxPJControl::sendPJLinkCommand(string command, bool sendOn) {
 		while (msgRx.length() < 8) {
 			msgRx = pjClient.receiveRaw();
 		}
+        //G debug
+        cout<<"MESSAGE RX : " <<msgRx<<endl;
+        
         ofLogNotice() << "Received response: " << msgRx << endl;
         //Really we should check if we get a valid response here...
         if(sendOn){
@@ -241,6 +308,53 @@ void ofxPJControl::pjLink_Off() {
 	string command = "%1POWR 0\r";
 	sendPJLinkCommand(command, false);
     ofLogNotice()<<"PJ LINK OFF SENT"<<endl;
+}
+
+void ofxPJControl::pjLink_mute_on() {
+    string command = "%1AVMT 11\r";
+    sendPJLinkCommand(command, true);
+    ofLogNotice()<<"PJ LINK MUTE ON SENT"<<endl;
+    
+}
+
+
+void ofxPJControl::pjLink_mute_off() {
+    string command = "%1AVMT 10\r";
+    sendPJLinkCommand(command, false);
+    ofLogNotice()<<"PJ LINK MUTE OFF SENT"<<endl;
+}
+
+void ofxPJControl::pjLink_get_power_status() {
+    
+//    ofLogNotice()<<"PJ get power "<<endl;
+//    string msgRx = "";
+//    string response = "";
+//
+//    ofLogNotice() << "received response: " << msgRx << endl;
+    
+    std::string msgRx = "";
+    cout <<pjClient.receiveRaw()<<endl;
+    attemptConnection();
+    std::string command = "%POWR ?\r";
+    
+    
+    if(connected){
+        ofLogNotice() << "Attempting to Send Command : " << "POWR?" << endl;
+        pjClient.sendRaw(command);
+        
+
+        ofLogNotice() << "Received response : " << msgRx << endl;
+        //Really we should check if we get a valid response here...
+        //        if(sendOn){
+        //            projStatus = true;
+        //        }else{
+        //            projStatus = false;
+        //        }
+        closeConnection();
+    }
+    
+
+    
 }
 
 void ofxPJControl::sanyo_On() {
